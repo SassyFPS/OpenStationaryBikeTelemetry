@@ -4,9 +4,9 @@ A small Windows app that scans for a Magene S3+ Bluetooth speed sensor on demand
 
 ## Run the published app
 
-Download and extract the Windows x64 app, then run `Cycle Data Project.exe`. It includes the .NET runtime, so installing the .NET SDK is not required. Open `http://127.0.0.1:8765/` when the app starts and click **Connect bike**. In OBS, use `http://127.0.0.1:8765/?overlay` as a Browser source.
+Download and extract the Windows x64 app, then run `Cycle Data Project.exe`. It includes the .NET runtime, so installing the .NET SDK is not required. The app opens its local control page automatically; click **Connect bike**. In OBS, use `http://127.0.0.1:8765/?overlay` as a Browser source. The OBS view is a compact horizontal strip with speed, session distance (two decimal places), and lifetime total distance (one decimal place).
 
-The executable expects `appsettings.json` and the `wwwroot` folder alongside it. Keep all published files together.
+The executable expects `appsettings.json` and the `wwwroot` folder alongside it. Keep all published files together. Open **Settings** on the control page for wheel circumference, clearing the session, or editing the lifetime total. Both clearing the session and changing the lifetime total require confirmation.
 
 ## Build a Windows executable
 
@@ -18,11 +18,9 @@ dotnet publish ".\Cycle Data Project.csproj" --configuration Release --runtime w
 
 Run `artifacts\publish\win-x64\Cycle Data Project.exe`. This produces a self-contained Windows x64 executable; `appsettings.json` and `wwwroot` are published beside it.
 
-## Put the project on GitHub
+## License
 
-Create a repository on GitHub, then upload the project files. Do not upload `bin`, `obj`, or `artifacts`—they are build output and are excluded by `.gitignore`. The included GitHub Actions workflow builds the project on pushes and pull requests and makes the Windows publish available as a workflow artifact.
-
-If the repository will be public and you want others to reuse or redistribute the code, choose and add a license. Without a license, standard copyright applies.
+This project is licensed under the [MIT License](./LICENSE). You may use, modify, and redistribute it, including commercially, subject to the terms in that license.
 
 ## Requirements
 
@@ -39,6 +37,8 @@ Edit `appsettings.json` beside the executable (or in the project folder when run
 
 The local control page also shows the active wheel circumference and has buttons to adjust it by 10 mm at a time. These changes apply immediately for the current app run; edit `appsettings.json` to make a new value the default next time.
 
+Session distance starts at zero each time the app starts. Distance ridden is added to both the session and lifetime total; clearing the session does not reduce the total. The lifetime total is saved on this PC under the current Windows user's local application data and persists across app restarts. The overlay displays the lifetime total truncated to one decimal place (rather than rounded up); its underlying accumulated value retains its precision. Edit the lifetime total as a plain decimal field to one decimal place; saving requires confirmation.
+
 ## Run from source
 
 From this folder:
@@ -47,7 +47,7 @@ From this folder:
 dotnet run
 ```
 
-Open the local address printed by the app in a browser and click **Connect bike**. Keep the sensor awake and turn its wheel while scanning. The scan runs for up to 30 seconds. The local app continues serving zero stats if no sensor is connected.
+The app opens the local control page automatically; click **Connect bike**. If the browser does not open, use the local address printed by the app. Keep the sensor awake and turn its wheel while scanning. The scan runs for up to 30 seconds. The local app continues serving zero stats if no sensor is connected.
 
 In OBS, add a **Browser** source and set its URL to:
 
@@ -55,7 +55,7 @@ In OBS, add a **Browser** source and set its URL to:
 http://127.0.0.1:8765/?overlay
 ```
 
-The app must remain running while the overlay is in use. Distance starts at zero each time the app starts and is calculated from wheel rotations received during that run.
+The app must remain running while the overlay is in use. Session distance starts at zero each time the app starts and is calculated from wheel rotations received during that run.
 Speed returns to zero after three seconds without a wheel update.
 Counter resets and samples above 150 km/h are discarded to prevent invalid sensor data from inflating speed or distance.
 

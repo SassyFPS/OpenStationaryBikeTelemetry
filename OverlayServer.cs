@@ -38,52 +38,105 @@ internal sealed class OverlayServer(CyclingData cyclingData, SensorManager senso
     {
         var request = context.Request;
         var response = context.Response;
+        var path = request.Url?.AbsolutePath;
 
-        if (request.Url?.AbsolutePath == "/api/connect" && request.HttpMethod == "POST")
+        if (request.HttpMethod == "POST")
         {
-            var started = sensorManager.StartScan();
-            var result = JsonSerializer.SerializeToUtf8Bytes(
-                new { started, status = sensorManager.GetStatus() },
-                JsonOptions);
-            response.StatusCode = started ? (int)HttpStatusCode.Accepted : (int)HttpStatusCode.Conflict;
-            response.ContentType = "application/json; charset=utf-8";
-            response.ContentLength64 = result.Length;
-            await response.OutputStream.WriteAsync(result, cancellationToken);
-            response.Close();
-            return;
-        }
-
-        if (request.Url?.AbsolutePath == "/api/wheel-circumference" && request.HttpMethod == "POST")
-        {
-            using var document = await JsonDocument.ParseAsync(request.InputStream, cancellationToken: cancellationToken);
-            if (!document.RootElement.TryGetProperty("deltaMm", out var deltaElement)
-                || !deltaElement.TryGetDouble(out var deltaMm)
-                || (deltaMm != WheelCircumferenceStepMm && deltaMm != -WheelCircumferenceStepMm))
+            if (path == "/api/connect")
             {
-                response.StatusCode = (int)HttpStatusCode.BadRequest;
-                response.Close();
-                return;
-            }
-
-            try
-            {
-                cyclingData.AdjustWheelCircumference(deltaMm);
-            }
-            catch (ArgumentOutOfRangeException exception)
-            {
-                response.StatusCode = (int)HttpStatusCode.Conflict;
-                var error = JsonSerializer.SerializeToUtf8Bytes(new { error = exception.Message }, JsonOptions);
+                var started = sensorManager.StartScan();
+                var result = JsonSerializer.SerializeToUtf8Bytes(
+                    new { started, status = sensorManager.GetStatus() },
+                    JsonOptions);
+                response.StatusCode = started ? (int)HttpStatusCode.Accepted : (int)HttpStatusCode.Conflict;
                 response.ContentType = "application/json; charset=utf-8";
-                response.ContentLength64 = error.Length;
-                await response.OutputStream.WriteAsync(error, cancellationToken);
+                response.ContentLength64 = result.Length;
+                await response.OutputStream.WriteAsync(result, cancellationToken);
                 response.Close();
                 return;
             }
 
-            var updatedData = JsonSerializer.SerializeToUtf8Bytes(cyclingData.GetSnapshot(), JsonOptions);
-            response.ContentType = "application/json; charset=utf-8";
-            response.ContentLength64 = updatedData.Length;
-            await response.OutputStream.WriteAsync(updatedData, cancellationToken);
+            if (path == "/api/session/clear")
+            {
+                cyclingData.ClearSessionDistance();
+                await WriteJsonResponseAsync(response, cyclingData.GetSnapshot(), cancellationToken);
+                return;
+            }
+
+            if (path == "/api/total-distance")
+            {
+                try
+                {
+                    using var document = await JsonDocument.ParseAsync(request.InputStream, cancellationToken: cancellationToken);
+                    if (!document.RootElement.TryGetProperty("distanceKm", out var distanceElement)
+                        || !distanceElement.TryGetDouble(out var distanceKm)
+                        || !double.IsFinite(distanceKm)
+                        || distanceKm < 0)
+                    {
+                        await WriteErrorResponseAsync(
+                            response,
+                            HttpStatusCode.BadRequest,
+                            "Total distance must be a finite, non-negative number.",
+                            cancellationToken);
+                        return;
+                    }
+
+                    cyclingData.SetTotalDistance(distanceKm);
+                    await WriteJsonResponseAsync(response, cyclingData.GetSnapshot(), cancellationToken);
+                }
+                catch (JsonException)
+                {
+                    await WriteErrorResponseAsync(
+                        response,
+                        HttpStatusCode.BadRequest,
+                        "Request body must be valid JSON.",
+                        cancellationToken);
+                }
+
+                return;
+            }
+
+            if (path == "/api/wheel-circumference")
+            {
+                try
+                {
+                    using var document = await JsonDocument.ParseAsync(request.InputStream, cancellationToken: cancellationToken);
+                    if (!document.RootElement.TryGetProperty("deltaMm", out var deltaElement)
+                        || !deltaElement.TryGetDouble(out var deltaMm)
+                        || (deltaMm != WheelCircumferenceStepMm && deltaMm != -WheelCircumferenceStepMm))
+                    {
+                        await WriteErrorResponseAsync(
+                            response,
+                            HttpStatusCode.BadRequest,
+                            "Wheel circumference can only be adjusted by 10 mm.",
+                            cancellationToken);
+                        return;
+                    }
+
+                    cyclingData.AdjustWheelCircumference(deltaMm);
+                    await WriteJsonResponseAsync(response, cyclingData.GetSnapshot(), cancellationToken);
+                }
+                catch (JsonException)
+                {
+                    await WriteErrorResponseAsync(
+                        response,
+                        HttpStatusCode.BadRequest,
+                        "Request body must be valid JSON.",
+                        cancellationToken);
+                }
+                catch (ArgumentOutOfRangeException exception)
+                {
+                    await WriteErrorResponseAsync(
+                        response,
+                        HttpStatusCode.Conflict,
+                        exception.Message,
+                        cancellationToken);
+                }
+
+                return;
+            }
+
+            response.StatusCode = (int)HttpStatusCode.NotFound;
             response.Close();
             return;
         }
@@ -96,7 +149,7 @@ internal sealed class OverlayServer(CyclingData cyclingData, SensorManager senso
         }
 
         byte[] content;
-        switch (request.Url?.AbsolutePath)
+        switch (path)
         {
             case "/":
                 content = await File.ReadAllBytesAsync(Path.Combine(_webRoot, "index.html"), cancellationToken);
@@ -129,5 +182,28 @@ internal sealed class OverlayServer(CyclingData cyclingData, SensorManager senso
         }
 
         response.Close();
+    }
+
+    private static async Task WriteJsonResponseAsync(
+        HttpListenerResponse response,
+        object value,
+        CancellationToken cancellationToken)
+    {
+        var content = JsonSerializer.SerializeToUtf8Bytes(value, JsonOptions);
+        response.ContentType = "application/json; charset=utf-8";
+        response.Headers[HttpResponseHeader.CacheControl] = "no-store";
+        response.ContentLength64 = content.Length;
+        await response.OutputStream.WriteAsync(content, cancellationToken);
+        response.Close();
+    }
+
+    private static async Task WriteErrorResponseAsync(
+        HttpListenerResponse response,
+        HttpStatusCode statusCode,
+        string message,
+        CancellationToken cancellationToken)
+    {
+        response.StatusCode = (int)statusCode;
+        await WriteJsonResponseAsync(response, new { error = message }, cancellationToken);
     }
 }

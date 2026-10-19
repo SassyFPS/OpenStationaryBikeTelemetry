@@ -1,6 +1,6 @@
 namespace Cycle_Data_Project;
 
-internal sealed class CyclingData(double wheelCircumferenceMm)
+internal sealed class CyclingData(double wheelCircumferenceMm, double totalDistanceKm)
 {
     private static readonly TimeSpan SpeedTimeout = TimeSpan.FromSeconds(3);
     private const uint CounterRolloverWindow = 100_000;
@@ -15,7 +15,8 @@ internal sealed class CyclingData(double wheelCircumferenceMm)
     private long _wheelNotificationCount;
     private byte? _lastMeasurementFlags;
     private string _lastMeasurementPacket = "No notifications received";
-    private double _distanceMeters;
+    private double _sessionDistanceMeters;
+    private double _totalDistanceMeters = totalDistanceKm * 1000d;
     private double _speedKph;
     private bool _connected;
 
@@ -41,6 +42,35 @@ internal sealed class CyclingData(double wheelCircumferenceMm)
 
             _wheelCircumferenceMm = circumferenceMm;
             return _wheelCircumferenceMm;
+        }
+    }
+
+    public void ClearSessionDistance()
+    {
+        lock (_lock)
+        {
+            _sessionDistanceMeters = 0;
+        }
+    }
+
+    public void SetTotalDistance(double distanceKm)
+    {
+        if (!double.IsFinite(distanceKm) || distanceKm < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(distanceKm), "Total distance must be a finite, non-negative value.");
+        }
+
+        lock (_lock)
+        {
+            _totalDistanceMeters = distanceKm * 1000d;
+        }
+    }
+
+    public double GetTotalDistanceKm()
+    {
+        lock (_lock)
+        {
+            return _totalDistanceMeters / 1000d;
         }
     }
 
@@ -98,7 +128,9 @@ internal sealed class CyclingData(double wheelCircumferenceMm)
                     return;
                 }
 
-                _distanceMeters += revolutionDelta * _wheelCircumferenceMm / 1000d;
+                var distanceMeters = revolutionDelta * _wheelCircumferenceMm / 1000d;
+                _sessionDistanceMeters += distanceMeters;
+                _totalDistanceMeters += distanceMeters;
                 _speedKph = speedKph;
             }
 
@@ -114,7 +146,8 @@ internal sealed class CyclingData(double wheelCircumferenceMm)
                 && DateTimeOffset.UtcNow - lastMeasurementAt <= SpeedTimeout;
             return new CyclingSnapshot(
                 Math.Round(speedIsCurrent ? _speedKph : 0, 1),
-                Math.Round(_distanceMeters / 1000d, 3),
+                Math.Round(_sessionDistanceMeters / 1000d, 3),
+                _totalDistanceMeters / 1000d,
                 _wheelCircumferenceMm,
                 _connected,
                 _notificationCount,
@@ -157,7 +190,8 @@ internal sealed class CyclingData(double wheelCircumferenceMm)
 
 internal sealed record CyclingSnapshot(
     double SpeedKph,
-    double DistanceKm,
+    double SessionDistanceKm,
+    double TotalDistanceKm,
     double WheelCircumferenceMm,
     bool Connected,
     long NotificationCount,

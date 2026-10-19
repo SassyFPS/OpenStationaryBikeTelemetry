@@ -7,55 +7,85 @@
   <link rel="stylesheet" href="/styles.css">
 </head>
 <body>
-  <main class="stats" aria-live="polite">
-    <section class="stat">
-      <span class="label">SPEED</span>
-      <div class="value"><span id="speed">0.0</span><span class="unit">km/h</span></div>
-    </section>
-    <section class="stat">
-      <span class="label">DISTANCE</span>
-      <div class="value"><span id="distance">0.000</span><span class="unit">km</span></div>
-    </section>
+  <main class="app">
+    <div class="stats" aria-live="polite">
+      <section class="stat">
+        <span class="label">SPEED</span>
+        <div class="value"><span id="speed">0.0</span><span class="unit">km/h</span></div>
+      </section>
+      <section class="stat">
+        <span class="label">SESSION DISTANCE</span>
+        <div class="value"><span id="session-distance">0.00</span><span class="unit">km</span></div>
+      </section>
+      <section class="stat">
+        <span class="label">TOTAL DISTANCE</span>
+        <div class="value"><span id="total-distance">0.0</span><span class="unit">km</span></div>
+      </section>
+    </div>
+
     <div class="controls">
       <button id="connect" type="button">Connect bike</button>
       <p id="status" class="status">Bike not connected</p>
     </div>
-    <p id="diagnostic" class="diagnostic"></p>
-    <section class="wheel-controls" aria-label="Wheel circumference setting">
-      <span class="wheel-label">WHEEL CIRCUMFERENCE</span>
-      <button id="decrease-wheel" type="button" aria-label="Decrease wheel circumference by 10 millimeters">−</button>
-      <span class="wheel-value"><span id="wheel-circumference">0</span> mm</span>
-      <button id="increase-wheel" type="button" aria-label="Increase wheel circumference by 10 millimeters">+</button>
-    </section>
+
+    <details class="settings-panel">
+      <summary>Settings</summary>
+      <div class="settings-content">
+        <section class="setting-row" aria-label="Wheel circumference setting">
+          <div class="setting-copy">
+            <span class="setting-title">Wheel circumference</span>
+            <span class="setting-description">Used to calculate speed and distance.</span>
+          </div>
+          <button id="decrease-wheel" class="step-button" type="button" aria-label="Decrease wheel circumference by 10 millimeters">−</button>
+          <span class="wheel-value"><span id="wheel-circumference">0</span> mm</span>
+          <button id="increase-wheel" class="step-button" type="button" aria-label="Increase wheel circumference by 10 millimeters">+</button>
+        </section>
+
+        <section class="setting-row">
+          <div class="setting-copy">
+            <span class="setting-title">Session distance</span>
+            <span class="setting-description">Clear this ride's distance without changing your total.</span>
+          </div>
+          <button id="clear-session" class="secondary-button" type="button">Clear session</button>
+        </section>
+
+        <form id="total-distance-form" class="setting-row">
+          <label class="setting-copy" for="total-distance-input">
+            <span class="setting-title">Total distance</span>
+            <span class="setting-description">Saved on this PC and increased as you ride.</span>
+          </label>
+          <input id="total-distance-input" type="text" inputmode="decimal" autocomplete="off" required aria-label="Total distance in kilometers">
+          <span class="input-unit">km</span>
+          <button class="secondary-button" type="submit">Save</button>
+        </form>
+
+        <p id="diagnostic" class="diagnostic"></p>
+      </div>
+    </details>
   </main>
   <script>
     const connectButton = document.querySelector("#connect");
     const statusElement = document.querySelector("#status");
     const decreaseWheelButton = document.querySelector("#decrease-wheel");
     const increaseWheelButton = document.querySelector("#increase-wheel");
+    const totalDistanceInput = document.querySelector("#total-distance-input");
 
     if (new URLSearchParams(location.search).has("overlay")) {
-      document.querySelectorAll(".controls, .wheel-controls").forEach(element => element.hidden = true);
+      document.querySelectorAll(".controls, .settings-panel").forEach(element => element.hidden = true);
     }
 
     async function adjustWheelCircumference(deltaMm) {
-      decreaseWheelButton.disabled = true;
-      increaseWheelButton.disabled = true;
       try {
         const response = await fetch("/api/wheel-circumference", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ deltaMm })
         });
-        if (!response.ok) {
-          const result = await response.json();
-          throw new Error(result.error || "Could not change wheel circumference");
-        }
-        updateWheelCircumference(await response.json());
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not change wheel circumference");
+        updateWheelCircumference(result);
       } catch (error) {
         statusElement.textContent = error.message;
-      } finally {
-        refresh();
       }
     }
 
@@ -64,6 +94,53 @@
         Number(data.wheelCircumferenceMm).toFixed(0);
       decreaseWheelButton.disabled = data.wheelCircumferenceMm <= 10;
       increaseWheelButton.disabled = data.wheelCircumferenceMm >= 5000;
+    }
+
+    function formatTotalDistance(distanceKm) {
+      return (Math.floor((distanceKm + 1e-10) * 10) / 10).toFixed(1);
+    }
+
+    async function refresh() {
+      try {
+        const [dataResponse, statusResponse] = await Promise.all([
+          fetch("/api/data", { cache: "no-store" }),
+          fetch("/api/status", { cache: "no-store" })
+        ]);
+        if (!dataResponse.ok || !statusResponse.ok) throw new Error("Stats unavailable");
+        const [data, sensorStatus] = await Promise.all([dataResponse.json(), statusResponse.json()]);
+        updateWheelCircumference(data);
+        document.querySelector("#speed").textContent = data.speedKph.toFixed(1);
+        document.querySelector("#session-distance").textContent = data.sessionDistanceKm.toFixed(2);
+        document.querySelector("#total-distance").textContent = formatTotalDistance(data.totalDistanceKm);
+        if (document.activeElement !== totalDistanceInput) {
+          totalDistanceInput.value = data.totalDistanceKm.toFixed(1);
+        }
+        statusElement.textContent = sensorStatus.message;
+        statusElement.classList.toggle("connected", data.connected);
+
+        const diagnosticElement = document.querySelector("#diagnostic");
+        if (data.connected) {
+          const flags = data.lastMeasurementFlags === null
+            ? "none"
+            : `0x${Number(data.lastMeasurementFlags).toString(16).padStart(2, "0")}`;
+          diagnosticElement.textContent =
+            `Notifications: ${data.notificationCount} · Wheel updates: ${data.wheelNotificationCount} · Last flags: ${flags} · Packet: ${data.lastMeasurementPacket}`;
+        } else {
+          diagnosticElement.textContent = "";
+        }
+
+        connectButton.disabled = ["scanning", "connecting", "connected"].includes(sensorStatus.state);
+        connectButton.textContent = {
+          scanning: "Scanning...",
+          connecting: "Connecting...",
+          connected: "Bike connected",
+          error: "Try again"
+        }[sensorStatus.state] || "Connect bike";
+      } catch {
+        statusElement.textContent = "App not connected";
+        statusElement.classList.remove("connected");
+        connectButton.disabled = false;
+      }
     }
 
     decreaseWheelButton.addEventListener("click", () => adjustWheelCircumference(-10));
@@ -84,42 +161,41 @@
       }
     });
 
-    async function refresh() {
+    document.querySelector("#clear-session").addEventListener("click", async () => {
+      if (!confirm("Clear the session distance? Your total distance will not change.")) return;
       try {
-        const [dataResponse, statusResponse] = await Promise.all([
-          fetch("/api/data", { cache: "no-store" }),
-          fetch("/api/status", { cache: "no-store" })
-        ]);
-        if (!dataResponse.ok || !statusResponse.ok) throw new Error("Stats unavailable");
-        const [data, sensorStatus] = await Promise.all([dataResponse.json(), statusResponse.json()]);
-        updateWheelCircumference(data);
-        document.querySelector("#speed").textContent = data.speedKph.toFixed(1);
-        document.querySelector("#distance").textContent = data.distanceKm.toFixed(3);
-        statusElement.textContent = sensorStatus.message;
-        statusElement.classList.toggle("connected", data.connected);
-        const diagnosticElement = document.querySelector("#diagnostic");
-        if (data.connected) {
-          const flags = data.lastMeasurementFlags === null
-            ? "none"
-            : `0x${Number(data.lastMeasurementFlags).toString(16).padStart(2, "0")}`;
-          diagnosticElement.textContent =
-            `Notifications: ${data.notificationCount} · Wheel updates: ${data.wheelNotificationCount} · Last flags: ${flags} · Packet: ${data.lastMeasurementPacket}`;
-        } else {
-          diagnosticElement.textContent = "";
-        }
-        connectButton.disabled = ["scanning", "connecting", "connected"].includes(sensorStatus.state);
-        connectButton.textContent = {
-          scanning: "Scanning...",
-          connecting: "Connecting...",
-          connected: "Bike connected",
-          error: "Try again"
-        }[sensorStatus.state] || "Connect bike";
+        const response = await fetch("/api/session/clear", { method: "POST" });
+        if (!response.ok) throw new Error("Could not clear session distance");
+        await refresh();
       } catch (error) {
-        statusElement.textContent = "App not connected";
-        statusElement.classList.remove("connected");
-        connectButton.disabled = false;
+        statusElement.textContent = error.message;
       }
-    }
+    });
+
+    document.querySelector("#total-distance-form").addEventListener("submit", async event => {
+      event.preventDefault();
+      const distanceKm = Number(totalDistanceInput.value.trim().replace(",", "."));
+      if (!Number.isFinite(distanceKm) || distanceKm < 0) {
+        statusElement.textContent = "Enter a valid non-negative total distance.";
+        return;
+      }
+      const roundedDistanceKm = Math.round((distanceKm + Number.EPSILON) * 10) / 10;
+      if (!confirm(`Set lifetime total distance to ${roundedDistanceKm.toFixed(1)} km?`)) return;
+
+      try {
+        const response = await fetch("/api/total-distance", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ distanceKm: roundedDistanceKm })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || "Could not save total distance");
+        totalDistanceInput.value = result.totalDistanceKm.toFixed(1);
+        await refresh();
+      } catch (error) {
+        statusElement.textContent = error.message;
+      }
+    });
 
     refresh();
     setInterval(refresh, 500);
