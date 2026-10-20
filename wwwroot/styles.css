@@ -1,4 +1,8 @@
 :root {
+  --neon-cyan: #00c8ff;
+  --electric-blue: #0066ff;
+  --dark-base: #080e19;
+  --dark-base-rgb: 8 14 25;
   color-scheme: dark;
   font-family: "Segoe UI", Arial, sans-serif;
   font-synthesis: none;
@@ -26,10 +30,31 @@ body {
   grid-template-columns: repeat(3, minmax(180px, 1fr));
   gap: 8px;
   padding: 10px;
-  border: 1px solid rgb(255 255 255 / 14%);
+  border: 2px solid var(--electric-blue);
   border-radius: 13px;
-  background: rgb(11 16 25 / 90%);
-  box-shadow: 0 8px 28px rgb(0 0 0 / 28%);
+  background: rgb(var(--dark-base-rgb) / 84%);
+  animation: stats-border-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes stats-border-pulse {
+  0%,
+  100% {
+    border-color: var(--electric-blue);
+    box-shadow: 0 0 8px rgb(0 102 255 / 45%), 0 8px 28px rgb(0 0 0 / 28%);
+  }
+
+  50% {
+    border-color: var(--neon-cyan);
+    box-shadow: 0 0 16px rgb(0 200 255 / 65%), 0 8px 28px rgb(0 0 0 / 28%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stats {
+    animation: none;
+    border-color: var(--electric-blue);
+    box-shadow: 0 0 10px rgb(0 102 255 / 45%), 0 8px 28px rgb(0 0 0 / 28%);
+  }
 }
 
 .stat {
@@ -40,7 +65,7 @@ body {
 }
 
 .label {
-  color: #9eabc0;
+  color: #8493aa;
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -60,9 +85,13 @@ body {
 }
 
 .unit {
-  color: #b9c3d1;
+  color: #9eabc0;
   font-size: 11px;
   font-weight: 500;
+}
+
+.speed-stat .value > span:first-child {
+  color: var(--neon-cyan);
 }
 
 .controls {
@@ -111,7 +140,7 @@ button:disabled {
   min-width: 0;
   border: 1px solid rgb(255 255 255 / 13%);
   border-radius: 10px;
-  background: rgb(11 16 25 / 92%);
+  background: rgb(var(--dark-base-rgb) / 86%);
 }
 
 .settings-panel summary {
@@ -198,7 +227,7 @@ button:disabled {
   padding: 8px 9px;
   border: 1px solid rgb(255 255 255 / 17%);
   border-radius: 6px;
-  background: #080e19;
+  background: var(--dark-base);
   color: #fff;
   font: inherit;
   font-size: 14px;
@@ -220,12 +249,23 @@ button:disabled {
 }
 
 @media (max-width: 520px) {
+  .stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .stat {
     padding: 8px 9px;
   }
 
+  .label {
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    white-space: normal;
+  }
+
   .value {
     gap: 4px;
+    font-size: clamp(18px, 5vw, 26px);
   }
 
   .unit {
